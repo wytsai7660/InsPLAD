@@ -1,4 +1,5 @@
 import multiprocessing as mp
+import resource
 from typing import final, override
 
 from lightning.pytorch.callbacks import EarlyStopping
@@ -60,6 +61,8 @@ class MyCLI(LightningCLI):
 
 
 def cli_main():
+    _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
     cli = MyCLI(
         MultiHeadGoodBackbone,
         InspladDataModule,
