@@ -56,6 +56,7 @@ class MyCLI(LightningCLI):
                 "early_stopping.mode": "min",
                 "early_stopping.patience": 5,
                 "trainer.logger": wandblogger,
+                "trainer.num_sanity_val_steps": 0,
             }
         )
 
@@ -68,6 +69,7 @@ def cli_main():
         InspladDataModule,
         trainer_defaults={"max_epochs": 100},
         seed_everything_default=67,
+        save_config_callback=None,
         # run=False,
     )
 
