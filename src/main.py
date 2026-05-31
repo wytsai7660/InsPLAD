@@ -24,7 +24,7 @@ class MyCLI(LightningCLI):
         }
         parser.set_defaults(
             {
-                "data.num_workers": mp.cpu_count(),
+                "data.num_workers": min(mp.cpu_count(), 8),
                 # "optimizer.lr": 1e-6,
                 "early_stopping.monitor": "val_loss",
                 "early_stopping.mode": "min",
