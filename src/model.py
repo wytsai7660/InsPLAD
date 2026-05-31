@@ -41,7 +41,7 @@ class MyLR(SequentialLR):
 class MultiHeadGoodBackbone(L.LightningModule):
     def __init__(
         self,
-        dino: str = "vit_large_patch16_dinov3_qkvb.lvd1689m",
+        name: str = "vit_large_patch16_dinov3.lvd1689m",
         img_size: int = 512,
         optimizer: OptimizerCallable = AdamW,
         scheduler: LRSchedulerCallable = MyLR,
@@ -59,7 +59,7 @@ class MultiHeadGoodBackbone(L.LightningModule):
         # 建議使用 pos_weight，你可以先設個通用值，或針對 5 個器材各給一個權重
         self.criterion = nn.BCEWithLogitsLoss()
         self.backbone = timm.create_model(
-            dino, pretrained=True, num_classes=0, dynamic_img_size=True
+            name, pretrained=True, num_classes=0, dynamic_img_size=True
         )
 
         for param in self.backbone.parameters():
@@ -69,11 +69,7 @@ class MultiHeadGoodBackbone(L.LightningModule):
         self.head = nn.Linear(embed_dim, len(Comp.name))
 
         data_config = timm.data.resolve_model_data_config(self.backbone)
-        data_config["input_size"] = (
-            3,
-            self.hparams["img_size"],
-            self.hparams["img_size"],
-        )
+        data_config["input_size"] = (3, img_size, img_size)
         self.train_transforms = timm.data.create_transform(
             **data_config, is_training=True
         )
