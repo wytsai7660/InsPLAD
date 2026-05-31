@@ -6,9 +6,35 @@ import timm.data
 import torch
 import torch.nn as nn
 import torchmetrics
+from lightning.pytorch.cli import LRSchedulerCallable, OptimizerCallable
+from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
+from torch.optim import AdamW, Optimizer
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torchmetrics import classification
 
 from src.helper import Comp
+
+
+class MyLR(SequentialLR):
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        warmup_epochs: int = 5,
+        annealing_epochs: int = 95,
+        start_factor: float = 0.1,
+    ):
+        super().__init__(
+            optimizer,
+            schedulers=[
+                LinearLR(
+                    optimizer,
+                    start_factor=start_factor,
+                    total_iters=warmup_epochs,
+                ),
+                CosineAnnealingLR(optimizer, T_max=annealing_epochs),
+            ],
+            milestones=[warmup_epochs],
+        )
 
 
 @final
@@ -17,9 +43,13 @@ class MultiHeadGoodBackbone(L.LightningModule):
         self,
         dino: str = "vit_large_patch16_dinov3_qkvb.lvd1689m",
         img_size: int = 512,
+        optimizer: OptimizerCallable = AdamW,
+        scheduler: LRSchedulerCallable = MyLR,
     ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["optimizer", "scheduler"])
+        self.optimizer = optimizer
+        self.scheduler = scheduler
         # 建議使用 pos_weight，你可以先設個通用值，或針對 5 個器材各給一個權重
         self.criterion = nn.BCEWithLogitsLoss()
         self.backbone = timm.create_model(
@@ -96,3 +126,9 @@ class MultiHeadGoodBackbone(L.LightningModule):
         for m in self.val_metrics.values():
             self.log_dict(m.compute())
             m.reset()
+
+    @override
+    def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
+        optimizer = self.optimizer(self.head.parameters())  # Train only the head
+        scheduler = self.scheduler(optimizer)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
