@@ -50,6 +50,12 @@ class MultiHeadGoodBackbone(L.LightningModule):
         self.save_hyperparameters(ignore=["optimizer", "scheduler"])
         self.optimizer = optimizer
         self.scheduler = scheduler
+
+        example_batch_size = 67
+        self.example_input_array = (
+            torch.zeros(example_batch_size, 3, img_size, img_size),
+            torch.zeros(example_batch_size, dtype=torch.int64),
+        )
         # 建議使用 pos_weight，你可以先設個通用值，或針對 5 個器材各給一個權重
         self.criterion = nn.BCEWithLogitsLoss()
         self.backbone = timm.create_model(
