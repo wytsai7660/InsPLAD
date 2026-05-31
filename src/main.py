@@ -28,6 +28,7 @@ class MyCLI(LightningCLI):
                 "early_stopping.monitor": "val_loss",
                 "early_stopping.mode": "min",
                 "early_stopping.patience": 5,
+                "trainer.precision": "bf16-mixed",
                 "trainer.logger": wandblogger,
                 "trainer.num_sanity_val_steps": 0,
             }
