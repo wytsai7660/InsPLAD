@@ -2,7 +2,7 @@ import multiprocessing as mp
 import resource
 from typing import final, override
 
-from lightning.pytorch.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 
 from src.datamodule import InspladDataModule
@@ -15,6 +15,7 @@ class MyCLI(LightningCLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
         parser.link_arguments("seed_everything", "data.kfold_seed")
         parser.add_lightning_class_args(EarlyStopping, "early_stopping")
+        parser.add_lightning_class_args(ModelCheckpoint, "model_checkpoint")
         wandblogger = {
             "class_path": "lightning.pytorch.loggers.WandbLogger",
             "init_args": {
@@ -28,6 +29,8 @@ class MyCLI(LightningCLI):
                 "early_stopping.monitor": "val_loss",
                 "early_stopping.mode": "min",
                 "early_stopping.patience": 5,
+                "model_checkpoint.monitor": "val_loss",
+                "model_checkpoint.mode": "min",
                 "trainer.precision": "bf16-mixed",
                 "trainer.max_epochs": 100,
                 "trainer.logger": wandblogger,
