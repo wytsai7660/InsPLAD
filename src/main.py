@@ -29,6 +29,7 @@ class MyCLI(LightningCLI):
                 "early_stopping.mode": "min",
                 "early_stopping.patience": 5,
                 "trainer.precision": "bf16-mixed",
+                "trainer.max_epochs": 100,
                 "trainer.logger": wandblogger,
                 "trainer.num_sanity_val_steps": 0,
             }
@@ -41,7 +42,6 @@ def cli_main():
     cli = MyCLI(
         MultiHeadGoodBackbone,
         InspladDataModule,
-        trainer_defaults={"max_epochs": 100},
         auto_configure_optimizers=False,
         seed_everything_default=67,
         save_config_callback=None,
