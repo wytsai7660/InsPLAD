@@ -81,9 +81,9 @@ class MultiHeadGoodBackbone(L.LightningModule):
             c: torchmetrics.MetricCollection(
                 {
                     # "recall@p92": classification.BinaryRecallAtFixedPrecision(0.92),
-                    "ap": classification.BinaryAveragePrecision(),
+                    "AP": classification.BinaryAveragePrecision(),
                 },
-                prefix=f"{Comp.to_name(c)}_",
+                postfix=f" ({Comp.to_name(c)})",
             )
             for c in Comp.id.values()
         }
@@ -107,7 +107,7 @@ class MultiHeadGoodBackbone(L.LightningModule):
         pred = self(img, comp)
 
         loss = self.criterion(pred, stat.float())
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=True, logger=False)
         return loss
 
     @override
