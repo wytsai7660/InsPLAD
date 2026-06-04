@@ -34,8 +34,8 @@ class TrainingDataset(Dataset):
 class InspladDataModule(L.LightningDataModule):
     def __init__(
         self,
-        n_folds: int,
-        fold_idx: int,
+        n_folds: int = 5,
+        fold_idx: int = 0,
         kfold_seed: int = "seed_everything",  # NOTE: actual default: `cli.config["seed_everything"]` (set in `MyCLI`)
         num_workers: int = "cpu_count",  # NOTE: actual default: `mp.cpu_count()` (set in `MyCLI`)
         batch_size: int = 32,
