@@ -37,7 +37,7 @@ class InspladDataModule(L.LightningDataModule):
         n_folds: int = 5,
         fold_idx: int = 0,
         kfold_seed: int = "seed_everything",  # NOTE: actual default: `cli.config["seed_everything"]` (set in `MyCLI`)
-        num_workers: int = "cpu_count",  # NOTE: actual default: `mp.cpu_count()` (set in `MyCLI`)
+        num_workers: int = "cpu_count",  # NOTE: actual default: `min(mp.cpu_count(), 8)` (set in `MyCLI`)
         batch_size: int = 32,
         test_batch_size: int = 128,
         pin_memory: bool = True,
