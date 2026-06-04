@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from sklearn.model_selection import StratifiedKFold
+from timm.data import create_transform
 from torch.utils.data import DataLoader, Dataset
 
 from src.helper import Comp, Stat
@@ -34,6 +35,7 @@ class TrainingDataset(Dataset):
 class InspladDataModule(L.LightningDataModule):
     def __init__(
         self,
+        img_size: int = 512,
         n_folds: int = 5,
         fold_idx: int = 0,
         kfold_seed: int = "seed_everything",  # NOTE: actual default: `cli.config["seed_everything"]` (set in `MyCLI`)
@@ -49,6 +51,10 @@ class InspladDataModule(L.LightningDataModule):
         self.save_hyperparameters(ignore=["data_dir"])
         self.train_dir = Path(data_dir) / "train_dataset"
         self.test_dir = Path(data_dir) / "test_dataset"
+
+        config = {"input_size": img_size, "interpolation": "bicubic", "crop_pct": 1.0}
+        self.train_transforms = create_transform(**config, is_training=True)
+        self.test_transforms = create_transform(**config, is_training=False)
 
         self.train_ds: TrainingDataset
         self.val_ds: TrainingDataset
@@ -75,8 +81,6 @@ class InspladDataModule(L.LightningDataModule):
 
     @override
     def setup(self, stage: str):
-        train_transforms = self.trainer.lightning_module.train_transforms  # pyright: ignore[reportOptionalMemberAccess]
-        test_transforms = self.trainer.lightning_module.test_transforms  # pyright: ignore[reportOptionalMemberAccess]
         if stage == "fit":
             # Unlovely implementation, but I believe this is the only way to do cross validations with DataModule
             full_df = pd.DataFrame(
@@ -99,8 +103,8 @@ class InspladDataModule(L.LightningDataModule):
 
             train_df = full_df.iloc[train_idx]
             val_df = full_df.iloc[val_idx]
-            self.train_ds = TrainingDataset(train_df, train_transforms)
-            self.val_ds = TrainingDataset(val_df, test_transforms)
+            self.train_ds = TrainingDataset(train_df, self.train_transforms)
+            self.val_ds = TrainingDataset(val_df, self.test_transforms)
 
     @override
     def train_dataloader(self):

@@ -14,6 +14,7 @@ class MyCLI(LightningCLI):
     @override
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
         parser.link_arguments("seed_everything", "data.kfold_seed")
+        parser.link_arguments("data.img_size", "model.img_size")
         parser.add_lightning_class_args(EarlyStopping, "early_stopping")
         parser.add_lightning_class_args(ModelCheckpoint, "model_checkpoint")
         wandblogger = {

@@ -2,7 +2,6 @@ from typing import final, override
 
 import lightning as L
 import timm
-import timm.data
 import torch
 import torch.nn as nn
 import torchmetrics
@@ -42,7 +41,7 @@ class MultiHeadGoodBackbone(L.LightningModule):
     def __init__(
         self,
         name: str = "vit_large_patch16_dinov3.lvd1689m",
-        img_size: int = 512,
+        img_size: int = "data.img_size",  # NOTE: actual default: `cli.config["data.img_size"]` (set in `datamodule.py`)
         optimizer: OptimizerCallable = AdamW,
         scheduler: LRSchedulerCallable = MyLR,
     ):
@@ -67,15 +66,6 @@ class MultiHeadGoodBackbone(L.LightningModule):
 
         embed_dim = self.backbone.num_features
         self.head = nn.Linear(embed_dim, len(Comp.name))
-
-        data_config = timm.data.resolve_model_data_config(self.backbone)
-        data_config["input_size"] = (3, img_size, img_size)
-        self.train_transforms = timm.data.create_transform(
-            **data_config, is_training=True
-        )
-        self.test_transforms = timm.data.create_transform(
-            **data_config, is_training=False
-        )
 
         self.val_metrics = {
             c: torchmetrics.MetricCollection(
