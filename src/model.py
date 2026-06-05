@@ -1,9 +1,11 @@
+from itertools import chain
 from typing import final, override
 
 import lightning as L
 import timm
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchmetrics
 from lightning.pytorch.cli import LRSchedulerCallable, OptimizerCallable
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
@@ -37,11 +39,33 @@ class MyLR(SequentialLR):
 
 
 @final
+class MLP(L.LightningModule):
+    def __init__(self, input_dim: int, output_dim: int, mlp_ratio: float = 0.5):
+        super().__init__()
+        hidden_dim = int(input_dim * mlp_ratio)
+        self.net = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.alpha = nn.Parameter(torch.tensor(0.0))
+        self.skip = nn.Linear(input_dim, hidden_dim, bias=False)
+        self.head = nn.Linear(hidden_dim, output_dim)
+
+    @override
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.skip(x) + self.alpha * self.net(x))
+
+
+@final
 class MultiHeadGoodBackbone(L.LightningModule):
     def __init__(
         self,
         name: str = "vit_large_patch16_dinov3.lvd1689m",
         img_size: int = "data.img_size",  # NOTE: actual default: `cli.config["data.img_size"]` (set in `datamodule.py`)
+        comp_weight: float = 0.3,
         optimizer: OptimizerCallable = AdamW,
         scheduler: LRSchedulerCallable = MyLR,
     ):
@@ -51,21 +75,20 @@ class MultiHeadGoodBackbone(L.LightningModule):
         self.scheduler = scheduler
 
         example_batch_size = 67
-        self.example_input_array = (
-            torch.zeros(example_batch_size, 3, img_size, img_size),
-            torch.zeros(example_batch_size, dtype=torch.int64),
+        self.example_input_array = torch.zeros(
+            example_batch_size, 3, img_size, img_size
         )
-        # 建議使用 pos_weight，你可以先設個通用值，或針對 5 個器材各給一個權重
-        self.criterion = nn.BCEWithLogitsLoss()
+
         self.backbone = timm.create_model(
             name, pretrained=True, num_classes=0, dynamic_img_size=True
         )
-
         for param in self.backbone.parameters():
             param.requires_grad = False
 
-        embed_dim = self.backbone.num_features
-        self.head = nn.Linear(embed_dim, len(Comp.name))
+        embed_dim = int(self.backbone.num_features)
+        self.comp_head = MLP(embed_dim, len(Comp.name), mlp_ratio=0.5)
+        fused_dim = embed_dim + len(Comp.name)
+        self.stat_head = MLP(fused_dim, 1, mlp_ratio=0.5)
 
         self.val_metrics = {
             c: torchmetrics.MetricCollection(
@@ -79,24 +102,26 @@ class MultiHeadGoodBackbone(L.LightningModule):
         }
 
     @override
-    def forward(self, img: torch.Tensor, comp: torch.Tensor):
+    def forward(self, img: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         feature = self.backbone(img)
-        all_logits = self.head(feature)
-
-        batch_size = img.size(0)
-        batch_indices = torch.arange(batch_size)
-
-        selected_logits = all_logits[batch_indices, comp]
-        return selected_logits
+        comp_logit = self.comp_head(feature)
+        comp_prob = torch.softmax(comp_logit, dim=-1)
+        fused_feature = torch.cat([feature, comp_prob], dim=-1)
+        stat_logit = self.stat_head(fused_feature).squeeze(-1)
+        return comp_logit, stat_logit
 
     @override
     def training_step(
         self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int
     ):
         img, comp, stat = batch
-        pred = self(img, comp)
+        comp_pred, stat_pred = self(img)
 
-        loss = self.criterion(pred, stat.float())
+        # TODO: imbalance-aware loss
+        comp_loss = F.cross_entropy(comp_pred, comp)
+        stat_loss = F.binary_cross_entropy_with_logits(stat_pred, stat.float())
+        loss = stat_loss + self.hparams["comp_weight"] * comp_loss
+
         self.log("train_loss", loss, prog_bar=True, logger=False)
         return loss
 
@@ -105,13 +130,21 @@ class MultiHeadGoodBackbone(L.LightningModule):
         self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int
     ):
         img, comp, stat = batch
-        pred = self(img, comp)
+        comp_pred, stat_pred = self(img)
 
-        loss = self.criterion(pred, stat.float())
-        self.log("val_loss", loss, batch_size=stat.shape[0], sync_dist=True)
+        # TODO: imbalance-aware loss
+        comp_loss = F.cross_entropy(comp_pred, comp)
+        stat_loss = F.binary_cross_entropy_with_logits(stat_pred, stat.float())
+        loss = stat_loss + self.hparams["comp_weight"] * comp_loss
+
+        batch_size = stat.shape[0]
+        self.log("val_loss_comp", comp_loss, batch_size=batch_size, sync_dist=True)
+        self.log("val_loss_stat", stat_loss, batch_size=batch_size, sync_dist=True)
+        self.log("val_loss", loss, batch_size=batch_size, sync_dist=True)
+
         for c, m in self.val_metrics.items():
             mask = comp == c
-            m.update(pred[mask], stat[mask])
+            m.update(stat_pred[mask], stat[mask])
 
     @override
     def on_validation_epoch_end(self):
@@ -121,6 +154,9 @@ class MultiHeadGoodBackbone(L.LightningModule):
 
     @override
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
-        optimizer = self.optimizer(self.head.parameters())  # Train only the head
+        # Train only the head
+        optimizer = self.optimizer(
+            chain(self.comp_head.parameters(), self.stat_head.parameters())
+        )
         scheduler = self.scheduler(optimizer)
         return {"optimizer": optimizer, "lr_scheduler": scheduler}
