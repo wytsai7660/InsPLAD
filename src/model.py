@@ -93,13 +93,16 @@ class MultiHeadGoodBackbone(L.LightningModule):
         self.val_metrics = {
             c: torchmetrics.MetricCollection(
                 {
-                    # "recall@p92": classification.BinaryRecallAtFixedPrecision(0.92),
+                    # The required precision is 0.9, chosen 0.92 for a safety margin
+                    "recall@p92": classification.BinaryRecallAtFixedPrecision(0.92),
                     "AP": classification.BinaryAveragePrecision(),
                 },
                 postfix=f" ({Comp.to_name(c)})",
             )
             for c in Comp.id.values()
         }
+
+        self.register_buffer("optimal_thresholds", torch.full((len(Comp.name),), 0.5))
 
     @override
     def forward(self, img: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -148,9 +151,17 @@ class MultiHeadGoodBackbone(L.LightningModule):
 
     @override
     def on_validation_epoch_end(self):
-        for m in self.val_metrics.values():
-            self.log_dict(m.compute())
+        for c, m in self.val_metrics.items():
+            result = m.compute()
+            for k, v in result.items():
+                if k.startswith("recall@p92"):
+                    recall, threshold = v
+                    self.optimal_thresholds[c] = threshold  # pyright: ignore[reportIndexIssue]
+                    self.log(k, recall)
+                else:
+                    self.log(k, v)
             m.reset()
+        # self.print(f"Optimal thresholds: {self.optimal_thresholds}")
 
     @override
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
