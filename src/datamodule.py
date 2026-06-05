@@ -32,6 +32,24 @@ class TrainingDataset(Dataset):
 
 
 @final
+class PredictionDataset(Dataset):
+    def __init__(self, df: pd.DataFrame, transform: Callable):
+        super().__init__()
+        self.df = df
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.df)
+
+    @override
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, str]:
+        row = self.df.iloc[index]
+        img = Image.open(row["path"]).convert("RGB")
+        img = self.transform(img)
+        return img, row["path"].name
+
+
+@final
 class InspladDataModule(L.LightningDataModule):
     def __init__(
         self,
@@ -50,7 +68,7 @@ class InspladDataModule(L.LightningDataModule):
         super().__init__()
         self.save_hyperparameters(ignore=["data_dir"])
         self.train_dir = Path(data_dir) / "train_dataset"
-        self.test_dir = Path(data_dir) / "test_dataset"
+        self.predict_dir = Path(data_dir) / "test_dataset"
 
         config = {"input_size": img_size, "interpolation": "bicubic", "crop_pct": 1.0}
         self.train_transforms = create_transform(**config, is_training=True)
@@ -58,13 +76,14 @@ class InspladDataModule(L.LightningDataModule):
 
         self.train_ds: TrainingDataset
         self.val_ds: TrainingDataset
+        self.predict_ds: PredictionDataset
 
     @override
     def prepare_data(self):
         train_file_id = r"14B3Jsj4DzoCrMC4YXlXEp0ej_reMgWkq"
         train_checksum = r"md5:449e4617aefa0d9c9d059e21c38b32f5"
-        test_file_id = r"1RhPBNwWxRYK0M8UvQcBBnVSpPzsEF3xn"
-        test_checksum = r"md5:5edc01fa26e9563449aa7e7885242e71"
+        predict_file_id = r"1RhPBNwWxRYK0M8UvQcBBnVSpPzsEF3xn"
+        predict_checksum = r"md5:5edc01fa26e9563449aa7e7885242e71"
 
         gdown.cached_download(
             id=train_file_id,
@@ -72,12 +91,12 @@ class InspladDataModule(L.LightningDataModule):
             hash=train_checksum,
         )
         gdown.cached_download(
-            id=test_file_id,
-            path=f"{self.test_dir}.zip",
-            hash=test_checksum,
+            id=predict_file_id,
+            path=f"{self.predict_dir}.zip",
+            hash=predict_checksum,
         )
         gdown.extractall(f"{self.train_dir}.zip")
-        gdown.extractall(f"{self.test_dir}.zip")
+        gdown.extractall(f"{self.predict_dir}.zip")
 
     @override
     def setup(self, stage: str):
@@ -106,6 +125,12 @@ class InspladDataModule(L.LightningDataModule):
             self.train_ds = TrainingDataset(train_df, self.train_transforms)
             self.val_ds = TrainingDataset(val_df, self.test_transforms)
 
+        elif stage == "predict":
+            predict_df = pd.DataFrame(
+                sorted(self.predict_dir.rglob("*.jpg")), columns=["path"]
+            )
+            self.predict_ds = PredictionDataset(predict_df, self.test_transforms)
+
     @override
     def train_dataloader(self):
         return DataLoader(
@@ -122,6 +147,18 @@ class InspladDataModule(L.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_ds,
+            batch_size=self.hparams["test_batch_size"],
+            shuffle=False,
+            num_workers=self.hparams["num_workers"],
+            pin_memory=self.hparams["pin_memory"],
+            persistent_workers=self.hparams["persistent_workers"],
+            prefetch_factor=self.hparams["prefetch_factor"],
+        )
+
+    @override
+    def predict_dataloader(self):
+        return DataLoader(
+            self.predict_ds,
             batch_size=self.hparams["test_batch_size"],
             shuffle=False,
             num_workers=self.hparams["num_workers"],
