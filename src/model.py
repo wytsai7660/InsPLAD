@@ -5,7 +5,6 @@ import lightning as L
 import timm
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torchmetrics
 from lightning.pytorch.cli import LRSchedulerCallable, OptimizerCallable
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
@@ -90,6 +89,11 @@ class MultiHeadGoodBackbone(L.LightningModule):
         fused_dim = embed_dim + len(Comp.name)
         self.stat_head = MLP(fused_dim, 1, mlp_ratio=0.5)
 
+        self.comp_criterion = nn.CrossEntropyLoss()
+        # apply pos_weight manually
+        self.stat_criterion = nn.BCEWithLogitsLoss(reduction="none")
+        self.pos_weights: torch.Tensor
+
         self.val_metrics = {
             c: torchmetrics.MetricCollection(
                 {
@@ -103,6 +107,13 @@ class MultiHeadGoodBackbone(L.LightningModule):
         }
 
         self.register_buffer("optimal_thresholds", torch.full((len(Comp.name),), 0.5))
+
+    @override
+    def on_fit_start(self):
+        self.pos_weights = torch.tensor(
+            self.trainer.datamodule.pos_weights,  # pyright: ignore[reportAttributeAccessIssue]
+            device=self.device,
+        )
 
     @override
     def forward(self, img: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -120,9 +131,11 @@ class MultiHeadGoodBackbone(L.LightningModule):
         img, comp, stat = batch
         comp_pred, stat_pred = self(img)
 
-        # TODO: imbalance-aware loss
-        comp_loss = F.cross_entropy(comp_pred, comp)
-        stat_loss = F.binary_cross_entropy_with_logits(stat_pred, stat.float())
+        comp_loss = self.comp_criterion(comp_pred, comp)
+        raw_stat_loss = self.stat_criterion(stat_pred, stat.float())
+        pw = self.pos_weights[comp]
+        stat_loss = (raw_stat_loss * torch.where(stat, pw, 1)).mean()
+
         loss = stat_loss + self.hparams["comp_weight"] * comp_loss
 
         self.log("train_loss", loss, prog_bar=True, logger=False)
@@ -135,9 +148,11 @@ class MultiHeadGoodBackbone(L.LightningModule):
         img, comp, stat = batch
         comp_pred, stat_pred = self(img)
 
-        # TODO: imbalance-aware loss
-        comp_loss = F.cross_entropy(comp_pred, comp)
-        stat_loss = F.binary_cross_entropy_with_logits(stat_pred, stat.float())
+        comp_loss = self.comp_criterion(comp_pred, comp)
+        raw_stat_loss = self.stat_criterion(stat_pred, stat.float())
+        pw = self.pos_weights[comp]
+        stat_loss = (raw_stat_loss * torch.where(stat, pw, 1)).mean()
+
         loss = stat_loss + self.hparams["comp_weight"] * comp_loss
 
         batch_size = stat.shape[0]

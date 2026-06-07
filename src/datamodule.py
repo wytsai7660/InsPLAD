@@ -74,6 +74,7 @@ class InspladDataModule(L.LightningDataModule):
         self.train_transforms = create_transform(**config, is_training=True)
         self.test_transforms = create_transform(**config, is_training=False)
 
+        self.pos_weights: pd.Series
         self.train_ds: TrainingDataset
         self.val_ds: TrainingDataset
         self.predict_ds: PredictionDataset
@@ -109,6 +110,9 @@ class InspladDataModule(L.LightningDataModule):
                 ],
                 columns=["path", "comp", "stat"],
             )
+
+            agg = full_df.groupby("comp")["stat"].agg(["sum", "count"])
+            self.pos_weights = (agg["count"] - agg["sum"]) / agg["sum"]  # pyright: ignore[reportAttributeAccessIssue]
 
             skf = StratifiedKFold(
                 n_splits=self.hparams["n_folds"],
