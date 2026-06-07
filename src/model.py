@@ -15,6 +15,7 @@ from torchmetrics import classification
 from src.helper import Comp
 
 
+@final
 class MyLR(SequentialLR):
     def __init__(
         self,
@@ -180,7 +181,7 @@ class MultiHeadGoodBackbone(L.LightningModule):
 
     @override
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
-        # Train only the head
+        # Train only the heads
         optimizer = self.optimizer(
             chain(self.comp_head.parameters(), self.stat_head.parameters())
         )
