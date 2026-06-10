@@ -1,12 +1,58 @@
 import multiprocessing as mp
+import os
 import resource
-from typing import final, override
+from collections.abc import Sequence
+from typing import Any, final, override
 
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+import lightning as L
+import pandas as pd
+import torch
+from lightning.pytorch.callbacks import (
+    BasePredictionWriter,
+    EarlyStopping,
+    ModelCheckpoint,
+)
 from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 
 from src.datamodule import InspladDataModule
 from src.model import MultiHeadGoodBackbone
+
+
+@final
+class CSVWriter(BasePredictionWriter):
+    def __init__(self, write_interval: str = "epoch"):
+        super().__init__(write_interval)
+
+    @override
+    def write_on_epoch_end(
+        self,
+        trainer: L.Trainer,
+        pl_module: L.LightningModule,
+        predictions: Sequence[tuple[Sequence[str], torch.Tensor]],
+        batch_indices: Sequence[Any],
+    ):
+        all_paths = []
+        all_is_bad = []
+
+        for batch in predictions:
+            path, is_bad = batch
+            all_paths.extend(path)
+            all_is_bad.append(is_bad)
+
+        all_is_bad_cat = torch.cat(all_is_bad, dim=0).int()
+
+        df = pd.DataFrame(
+            {
+                "id": [int(os.path.splitext(p)[0]) for p in all_paths],
+                "filename": all_paths,
+                "pred_label": all_is_bad_cat,
+            }
+        )
+        df = df.sort_values(by="id")
+        df = df.drop(columns=["id"])
+
+        out_file = "submission.csv"
+        df.to_csv(out_file, index=False)
 
 
 @final
@@ -17,6 +63,7 @@ class MyCLI(LightningCLI):
         parser.link_arguments("data.img_size", "model.img_size")
         parser.add_lightning_class_args(EarlyStopping, "early_stopping")
         parser.add_lightning_class_args(ModelCheckpoint, "model_checkpoint")
+        parser.add_lightning_class_args(CSVWriter, "csv_writer")
         wandblogger = {
             "class_path": "lightning.pytorch.loggers.WandbLogger",
             "init_args": {

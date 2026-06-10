@@ -166,6 +166,17 @@ class MultiHeadGoodBackbone(L.LightningModule):
             m.update(stat_pred[mask], stat[mask])
 
     @override
+    def predict_step(
+        self, batch: tuple[torch.Tensor, list[str]], batch_idx: int
+    ) -> tuple[list[str], torch.Tensor]:
+        img, path = batch
+        comp_pred, stat_pred = self(img)
+        comp = torch.argmax(comp_pred, dim=-1)
+        stat_prob = torch.sigmoid(stat_pred)
+        is_bad = stat_prob > self.optimal_thresholds[comp]  # pyright: ignore[reportIndexIssue]
+        return path, is_bad
+
+    @override
     def on_validation_epoch_end(self):
         for c, m in self.val_metrics.items():
             result = m.compute()
